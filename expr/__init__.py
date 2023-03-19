@@ -1,5 +1,6 @@
-from .nodes import Variable
+from expr.nodes import Variable
+from expr.differentiator import Differentiator
 
-X = Variable(name='x', index=0)
-Y = Variable(name='y')
-IT = Variable(name=None, index=0)
+X = Variable(index=0)
+Y = Variable(index=1)
+Z = Variable(index=2)

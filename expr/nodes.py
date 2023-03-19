@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
-from operator import add, sub, mul, truediv as div
+from operator import add, sub, mul, truediv as div, pow
 from dataclasses import dataclass
-from typing import Callable, ClassVar, Optional, Union, Any
+from typing import Callable, ClassVar, Optional, Union, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from expr.visitor import NodeVisitor, ResultT
 
 Number = float
-
 
 class Node(ABC):
     def __add__(self, node) -> 'Node':
@@ -16,55 +18,45 @@ class Node(ABC):
     def __mul__(self, node) -> 'Node':
         return BinaryOperation(operator=mul, left=self, right=_node_or_constant(node))
 
-    @abstractmethod
-    def __call__(self, *args, **kwargs) -> Number:
-        raise NotImplementedError
+    def __call__(self, *args, evaluator: 'Optional[NodeVisitor[ResultT]]'=None) -> 'ResultT':
+        from expr.value import ValueVisitor
+        if evaluator is None:
+            evaluator = ValueVisitor()
+        return self.calculate(*args, visitor=evaluator)
 
     @abstractmethod
-    def derivative(self, *args, **kwargs) -> Number:
+    def calculate(self, *args, visitor: 'NodeVisitor[ResultT]') -> 'ResultT':
         raise NotImplementedError
 
 
-def _node_or_constant(val: Union[Node, Number]) -> Node:
+def _node_or_constant(val: Node | Number) -> Node:
     if isinstance(val, Node):
         return val
-    return Constant(value=val)
+    return Constant(constant=val)
 
 
 @dataclass
 class Constant(Node):
-    value: Number
+    constant: Number
 
-    def __call__(self, *args, **kwargs) -> Number:
-        return self.value
+    def calculate(self, *args, visitor: 'NodeVisitor[ResultT]') -> 'ResultT':
+        return visitor.visit_constant(self, *args)
 
-    def derivative(self, *args, **kwargs) -> Number:
-        return 0
+
 
 
 @dataclass
 class Variable(Node):
-    name: Optional[str]
-    index: Optional[int] = None
+    index: int
 
-    def __post_init__(self):
-        if self.name is None and self.index is None:
-            raise ValueError("one of name or index must be set")
+    def calculate(self, *args, visitor: 'NodeVisitor[ResultT]') -> 'ResultT':
+        return visitor.visit_variable(self, *args)
 
-    def __call__(self, *args, **kwargs) -> Number:
-        if self.name and self.name in kwargs:
-            return kwargs[self.name]
-
-        assert self.index is not None
-        return args[self.index]
-
-    def derivative(self, *args, **kwargs) -> Number:
-        return 1
 
 
 @dataclass
 class BinaryOperation(Node):
-    SUPPORTED_OPS: ClassVar = (add, sub, mul)
+    SUPPORTED_OPS: ClassVar = (add, sub, mul, pow)
 
     operator: Callable[[Number, Number], Number]
     left: Node
@@ -74,17 +66,6 @@ class BinaryOperation(Node):
         if self.operator not in self.SUPPORTED_OPS:
             raise ValueError(f'unknown operator: {self.operator}, expecting one of {self.SUPPORTED_OPS}')
 
-    def __call__(self, *args, **kwargs) -> Number:
-        return self.operator(self.left(*args, **kwargs), self.right(*args, **kwargs))
+    def calculate(self, *args, visitor: 'NodeVisitor[ResultT]') -> 'ResultT':
+        return visitor.visit_binary_operation(self, *args)
 
-    def derivative(self, *args, **kwargs) -> Number:
-        if self.operator == add or self.operator == sub:
-            return self.operator(self.left.derivative(*args, **kwargs), self.right.derivative(*args, **kwargs))
-        elif self.operator == mul:
-            left_val = self.left(*args, **kwargs)
-            left_derivate = self.left.derivative(*args, **kwargs)
-            right_val = self.right(*args, **kwargs)
-            right_derivate = self.right.derivative(*args, **kwargs)
-            return left_val * right_derivate + left_derivate * right_val
-
-        raise Exception("unexpected operator")
